@@ -1,0 +1,147 @@
+import numpy as np
+import pandas as pd
+import tkinter as tk
+from tkinter import messagebox, ttk, filedialog
+import json
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+# Load dataset
+dataset = "symp_dataset.csv"
+df = pd.read_csv(dataset)
+X = df.drop(columns=["disease"])
+y = df["disease"]
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
+
+# Train model
+nb_model = GaussianNB()
+nb_model.fit(X_train, y_train)
+
+# Calculate metrics
+y_pred = nb_model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+
+def predict_disease(symptom_inputs):
+    symptom_array = np.array(symptom_inputs, dtype=float).reshape(1, -1)
+    print(f"Input shape: {symptom_array.shape}, Expected: {(1, len(X.columns))}")
+    probs = nb_model.predict_proba(symptom_array)[0]
+    print("Probabilities:", probs)
+    print(f"Number of classes: {len(probs)}")
+    top_3_indices = np.argsort(probs)[-3:][::-1]
+    print("Top 3 indices:", top_3_indices)
+    top_3_diseases = label_encoder.inverse_transform(top_3_indices)
+    print("Top 3 diseases:", top_3_diseases)
+    top_3_probs = probs[top_3_indices] * 100
+    print("Top 3 probs:", top_3_probs)
+    return list(zip(top_3_diseases, top_3_probs))
+
+def submit():
+    user_inputs = [var.get() for var in symptom_vars]
+    if all(v == 0 for v in user_inputs):
+        messagebox.showinfo("Error", "Please select at least one symptom")
+    else:
+        predictions = predict_disease(user_inputs)
+        result_text = "Top 3 Predicted Diseases:\n" + "\n".join(
+            [f"{disease}: {prob:.2f}%" for disease, prob in predictions]
+        )
+        messagebox.showinfo("Prediction Result", result_text)
+        save_button.config(state="normal")
+
+def reset():
+    for var in symptom_vars:
+        var.set(0)
+    search_var.set("")
+    update_symptom_list()
+    save_button.config(state="disabled")
+
+def save_results():
+    user_inputs = [var.get() for var in symptom_vars]
+    predictions = predict_disease(user_inputs)
+    result = {"symptoms": {s: v for s, v in zip(X.columns, user_inputs) if v}, 
+              "predictions": {d: p for d, p in predictions}}
+    file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+    if file_path:
+        with open(file_path, 'w') as f:
+            json.dump(result, f, indent=4)
+        messagebox.showinfo("Success", "Results saved successfully!")
+
+def update_symptom_list(*args):
+    search_term = search_var.get().lower()
+    for widget in scrollable_frame.winfo_children():
+        if isinstance(widget, tk.Checkbutton):
+            widget.destroy()
+    for i, symptom in enumerate(X.columns):
+        if search_term in symptom.lower():
+            chk = tk.Checkbutton(scrollable_frame, text=symptom, variable=symptom_vars[i], 
+                               font=("Arial", 12), bg="white", 
+                               selectcolor="#90EE90", 
+                               activebackground="#f0f0f0",
+                               command=lambda s=symptom: update_color(s))
+            chk.pack(anchor="w", padx=10)
+            if symptom_vars[i].get():
+                chk.config(bg="#90EE90")
+
+def update_color(symptom):
+    for widget in scrollable_frame.winfo_children():
+        if isinstance(widget, tk.Checkbutton) and widget.cget("text") == symptom:
+            widget.config(bg="#90EE90" if symptom_vars[X.columns.get_loc(symptom)].get() else "white")
+
+# GUI Setup
+root = tk.Tk()
+root.title("Enhanced Disease Prediction (Naive Bayes)")
+root.geometry("600x800")
+root.configure(bg="#f5f5f5")
+root.resizable(True, True)
+
+# Title
+tk.Label(root, text="Disease Prediction", font=("Arial", 18, "bold"), bg="#4A90E2", fg="white", pady=10).pack(fill="x")
+
+# Metrics Frame
+metrics_frame = tk.Frame(root, bg="#f5f5f5")
+metrics_frame.pack(pady=10)
+tk.Label(metrics_frame, text="Model Performance:", font=("Arial", 12, "bold"), bg="#f5f5f5").grid(row=0, column=0, columnspan=2)
+tk.Label(metrics_frame, text=f"Accuracy: {accuracy:.2%}", font=("Arial", 12), bg="#f5f5f5").grid(row=1, column=0, padx=5, sticky="w")
+tk.Label(metrics_frame, text=f"Precision: {precision:.2%}", font=("Arial", 12), bg="#f5f5f5").grid(row=1, column=1, padx=5, sticky="w")
+tk.Label(metrics_frame, text=f"Recall: {recall:.2%}", font=("Arial", 12), bg="#f5f5f5").grid(row=2, column=0, padx=5, sticky="w")
+tk.Label(metrics_frame, text=f"F1-Score: {f1:.2%}", font=("Arial", 12), bg="#f5f5f5").grid(row=2, column=1, padx=5, sticky="w")
+
+# Search Bar
+search_frame = tk.Frame(root, bg="#f5f5f5")
+search_frame.pack(fill="x", padx=20, pady=5)
+tk.Label(search_frame, text="Search Symptoms:", bg="#f5f5f5").pack(side="left")
+search_var = tk.StringVar()
+tk.Entry(search_frame, textvariable=search_var).pack(side="left", fill="x", expand=True, padx=5)
+search_var.trace("w", update_symptom_list)
+
+# Scrollable Frame
+frame = tk.Frame(root, bg="white")
+frame.pack(pady=10, padx=20, fill="both", expand=True)
+canvas = tk.Canvas(frame, bg="white")
+scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+scrollable_frame = tk.Frame(canvas, bg="white")
+scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+canvas.configure(yscrollcommand=scrollbar.set)
+scrollbar.pack(side="right", fill="y")
+canvas.pack(side="left", fill="both", expand=True)
+
+# Symptom Vars
+symptom_vars = [tk.IntVar() for _ in X.columns]
+update_symptom_list()
+
+# Buttons Frame
+button_frame = tk.Frame(root, bg="#f5f5f5")
+button_frame.pack(pady=20, fill="x")
+tk.Button(button_frame, text="Predict", command=submit, font=("Arial", 14), bg="#28a745", fg="white").pack(side="left", padx=10)
+tk.Button(button_frame, text="Reset", command=reset, font=("Arial", 14), bg="#dc3545", fg="white").pack(side="left", padx=10)
+save_button = tk.Button(button_frame, text="Save Results", command=save_results, font=("Arial", 14), bg="#007bff", fg="white", state="disabled")
+save_button.pack(side="left", padx=10)
+
+root.mainloop()
